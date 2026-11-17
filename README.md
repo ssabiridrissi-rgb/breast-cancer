@@ -10,9 +10,14 @@
   <img src="https://img.shields.io/badge/scikit--learn-modèles-F7931E?logo=scikitlearn&logoColor=white" alt="scikit-learn">
   <img src="https://img.shields.io/badge/MinIO-S3-C72E49?logo=minio&logoColor=white" alt="MinIO">
   <img src="https://img.shields.io/badge/Redis-cache-DC382D?logo=redis&logoColor=white" alt="Redis">
+  <img src="https://img.shields.io/badge/HPA-2→6_pods-326CE5?logo=kubernetes&logoColor=white" alt="HPA">
 </p>
 
-<p align="center"><i>TP Kubernetes du module Cloud & IA — FSSM Marrakech, Pr. Mohammed AMEKSA — 2026/2027</i></p>
+<p align="center"><i>TP Kubernetes du module Cloud & IA — Pr. Mohammed AMEKSA — 2026/2027</i></p>
+
+<p align="center">
+  <b>Partie A</b> : déployer la stack &nbsp;·&nbsp; <b>Partie B</b> : l'exploiter (sondes, config à chaud, autoscaling, mise à jour et rollback)
+</p>
 
 ---
 
@@ -30,20 +35,24 @@ Avec seulement `docker run`, on se heurte vite à des murs :
 - 💥 un conteneur qui plante reste par terre, personne ne le relance ;
 - 🔑 les mots de passe et les adresses finissent écrits en dur dans les images ;
 - 🧭 les services se cherchent par IP, et l'IP change à chaque redémarrage ;
-- 🚪 chaque composant ouvre son propre port vers l'extérieur.
+- 📈 un pic de trafic, et il faut ajouter des conteneurs à la main ;
+- 🔄 une mise à jour, c'est une coupure, et un retour en arrière, c'est la panique.
 
-Le code applicatif et les Dockerfiles étaient fournis. **Tout le travail est dans `k8s/`** : neuf manifestes écrits à la main, un par étape.
+Le code applicatif et les Dockerfiles étaient fournis. **Tout le travail est dans `k8s/`** : douze manifestes, écrits à la main, étape par étape.
 
 ## Ce que Kubernetes règle ici
 
-| Principe | Ce que ça change concrètement |
-|---|---|
-| ♻️ **Auto-réparation** | Un pod de l'API supprimé est recréé en quelques secondes par son Deployment |
-| ⚖️ **Répartition de charge** | 3 réplicas derrière un seul nom, `bc-api` : on voit le pod qui répond changer à chaque appel |
-| 🧩 **Configuration externalisée** | Aucune adresse ni mot de passe dans les images : tout vient de 2 ConfigMaps et 2 Secrets |
-| 🧭 **Découverte par nom** | Le front appelle `bc-api:8000`, l'API appelle `minio:9000` et `base:6379`. Pas une seule IP dans le code |
-| 🚪 **Un seul point d'entrée** | `http://bc.local` : l'Ingress envoie `/api` vers l'API et tout le reste vers l'interface |
-| 🏁 **Tâche ponctuelle** | L'entraînement est un Job : il tourne, dépose les modèles, s'arrête |
+| Principe | Ce que ça change concrètement | Partie |
+|---|---|---|
+| 🧩 **Configuration externalisée** | Aucune adresse ni mot de passe dans les images : tout vient de 2 ConfigMaps et 2 Secrets | A |
+| 🧭 **Découverte par nom** | Le front appelle `bc-api:8000`, l'API appelle `minio:9000` et `base:6379`. Pas une seule IP dans le code | A |
+| 🚪 **Un seul point d'entrée** | `http://bc.local` : l'Ingress envoie `/api` vers l'API, et tout le reste vers l'interface | A |
+| 🏁 **Tâche ponctuelle** | L'entraînement est un Job : il tourne, dépose les modèles, s'arrête | A |
+| 🩺 **Auto-réparation** | Un pod bloqué est redémarré en 20 à 30 s par sa liveness | B |
+| 🚦 **Mise à l'écart** | Quand Redis tombe, l'API sort du trafic sans redémarrer, puis revient seule | B |
+| 🎛️ **Configuration à chaud** | Le seuil de décision change en une minute, sans recréer un seul pod | B |
+| 📈 **Autoscaling** | De 3 à 6 pods en moins de deux minutes quand le CPU s'emballe | B |
+| 🔄 **Mise à jour sans coupure** | Passage en v2 pod par pod, puis retour en v1 en une commande | B |
 
 ## La démo, en vrai
 
@@ -60,36 +69,29 @@ Le code applicatif et les Dockerfiles étaient fournis. **Tout le travail est da
 
 Deux clics, deux pods différents : c'est le Service `bc-api` qui répartit les requêtes.
 
-Côté terminal :
-
-```text
-> curl.exe http://bc.local/api/info
-{"app_version":"1.0","model_version":"v1","algo":"linear","pod":"bc-api-859d848f6b-4n9st", ...}
-
-> kubectl exec deploy/redis -- redis-cli ping
-PONG
-```
-
 ## Comment ça marche, en clair
 
 Imaginez un restaurant.
 
 - Le **Job** est le cuisinier : il prépare les plats une seule fois (il entraîne les modèles), les range, puis rentre chez lui.
 - **MinIO** est la chambre froide où les plats attendent.
-- Les **3 pods de l'API** sont les serveurs : ils vont chercher les plats et les servent aux clients.
+- Les **pods de l'API** sont les serveurs : ils vont chercher les plats et les servent aux clients.
 - **Redis** est le carnet de commandes : il compte, et se souvient de ce qu'on vient de servir.
 - **Streamlit** est la salle. L'**Ingress** est la porte d'entrée, et c'est la seule.
-- Les **ConfigMaps** et les **Secrets** sont les consignes affichées en cuisine. Les Secrets, c'est la partie qu'on ne laisse pas traîner.
+- Les **sondes** sont le chef de salle : il vérifie régulièrement que chaque serveur répond, renvoie chez lui celui qui est bloqué, et met en pause celui qui n'a pas encore ses plats.
+- Le **HPA** appelle des renforts quand la salle se remplit, et les renvoie quand elle se vide.
 
 ```mermaid
 flowchart LR
     user([Navigateur]) -->|http://bc.local| ing[Ingress<br/>bc-ingress]
     ing -->|"/"| front[bc-front<br/>Streamlit]
-    ing -->|/api| api[bc-api<br/>FastAPI ×3]
+    ing -->|/api| api[bc-api<br/>FastAPI ×2 à 6]
     front -->|bc-api:8000| api
-    api -->|minio:9000| minio[(MinIO<br/>models/v1)]
+    api -->|minio:9000| minio[(MinIO<br/>models/v1 + v2)]
     api -->|base:6379| redis[(Redis)]
-    job[[Job bc-train-v1]] -->|dépose| minio
+    job1[[Job bc-train-v1]] -->|dépose v1| minio
+    job2[[Job bc-train-v2]] -->|dépose v2| minio
+    hpa{{HPA<br/>cible 50 % CPU}} -.ajuste.-> api
 ```
 
 ### Le trajet d'une prédiction
@@ -98,7 +100,7 @@ flowchart LR
 sequenceDiagram
     participant N as Navigateur
     participant F as bc-front
-    participant A as bc-api (1 pod sur 3)
+    participant A as bc-api (un des pods)
     participant R as Redis
     N->>F: clic « Prédire le diagnostic »
     F->>A: POST /api/predict/classification + X-API-Key
@@ -113,81 +115,163 @@ sequenceDiagram
     A-->>F: prédiction, probabilité, pod qui a répondu
 ```
 
-Un détail qui compte : au démarrage, l'API cherche ses modèles dans MinIO. S'ils ne sont pas encore là, elle **réessaie toutes les 5 secondes** au lieu de planter. Pendant le TP, MinIO a mis un moment à repartir après un redémarrage de Minikube. Les logs montrent l'API qui patiente, puis `modèles v1 chargés`, sans aucune intervention.
+---
 
-## Les manifestes, étape par étape
+## Partie A — Déployer la stack
 
 Chaque fichier a été écrit avec la méthode **GMA** : **G**énérer le squelette (`kubectl create … --dry-run=client -o yaml`), le **M**odifier, puis l'**A**ppliquer (`kubectl apply -f`). Le fichier reste la référence.
 
 | # | Fichier | Objets | Ce que l'étape montre |
 |---|---|---|---|
-| 00 | `00-pod-api.yaml` | Pod | Un pod seul est `Running` mais incapable de prédire, et il ne revient pas si on le supprime |
+| 00 | `00-pod-api.yaml` | Pod | Un pod seul est `Running`, mais incapable de prédire, et il ne revient pas si on le supprime |
 | 01 | `01-secrets.yaml` | 2 Secrets | Mots de passe MinIO et clé d'API, seulement encodés en base64 (non versionné) |
 | 02 | `02-configmaps.yaml` | 2 ConfigMaps | `ml-config` en variables, `model-config` en **fichier monté** |
 | 03 | `03-minio.yaml` | Deployment + Service | Renommage des clés du Secret, volume `emptyDir`, stratégie `Recreate` |
 | 04 | `04-train-job-v1.yaml` | Job | `backoffLimit`, `restartPolicy: Never`, requests/limits |
-| 05 | `05-redis.yaml` | Deployment + Service `base` | Un Service peut porter un autre nom que son Deployment, et c'est le *selector* qui fait le lien |
-| 06 | `06-api.yaml` | Deployment ×3 + Service | `envFrom`, `secretKeyRef`, ConfigMap monté sans `subPath` |
-| 07 | `07-front.yaml` | Deployment + Service | `configMapKeyRef` et port 80 → 8501 |
-| 08 | `08-ingress.yaml` | Ingress | Routage par préfixe et timeouts pour le websocket de Streamlit |
+| 05 | `05-redis.yaml` | Deployment + Service `base` | Un Service peut porter un autre nom que son Deployment : c'est le *selector* qui fait le lien |
+| 06 | `06-api.yaml` | Deployment + Service | `envFrom`, `secretKeyRef`, ConfigMap monté sans `subPath` |
+| 07 | `07-front.yaml` | Deployment + Service | `configMapKeyRef`, port 80 → 8501 |
+| 08 | `08-ingress.yaml` | Ingress | Routage par préfixe, timeouts pour le websocket de Streamlit |
 
-## Les modèles
+Au démarrage, l'API cherche ses modèles dans MinIO. S'ils ne sont pas encore là, elle **réessaie toutes les 5 secondes** au lieu de planter. Pendant le TP, les logs l'ont montrée patienter (`NoSuchBucket`), puis afficher `modèles v1 chargés` dès que le Job a fini, sans aucune intervention.
 
-Résultats du Job `bc-train-v1` (`ALGO=linear`, 20 % des données gardées pour le test) :
+---
 
-| Tâche | Modèle | Mesure | Score |
+## Partie B — Exploiter la stack
+
+### 🩺 Des sondes sur chaque composant
+
+| Composant | startup | liveness | readiness | requests → limits |
+|---|---|---|---|---|
+| API | `/health`, 2 s × 30 | `/health`, 10 s × 3 | `/ready`, 5 s × 2 | 100m/256Mi → 500m/512Mi |
+| Front | `/_stcore/health`, 5 s × 24 | `/_stcore/health` | `/_stcore/health` | 100m/256Mi → 1/768Mi |
+| MinIO | — | `/minio/health/live` | `/minio/health/ready` | 100m/256Mi → 500m/512Mi |
+| Redis | — | `tcpSocket` 6379 | `exec redis-cli ping` | 50m/64Mi → 250m/128Mi |
+
+Toute la partie B repose sur une distinction simple :
+
+- **liveness** (`/health`) : « le programme répond-il ? » Si non, **redémarrage** ;
+- **readiness** (`/ready`) : « modèles chargés **et** Redis joignable ? » Si non, le pod est **retiré du trafic**, mais pas redémarré.
+
+**Expérience A — Redis arrêté.** Les 3 pods de l'API passent en `0/1` en une dizaine de secondes, et `RESTARTS` reste à 0. Le Service se vide, et l'Ingress répond `503`. Redis revient : les pods repassent en `1/1` tout seuls.
+
+<p align="center"><img src="docs/readiness-redis-arrete.png" alt="Readiness" width="75%"></p>
+
+**Expérience B — API bloquée** (`/api/admin/break-health`). La liveness échoue 3 fois de suite, et Kubernetes redémarre le conteneur **20 s après le premier échec**, soit 2 intervalles de 10 s.
+
+<p align="center"><img src="docs/liveness-events.png" alt="Liveness" width="80%"></p>
+
+**Expérience C — ressources.** Au repos, l'API utilise environ 5m de CPU pour 100m réservés, et environ 120Mi de mémoire. Elle est en QoS **Burstable** : un minimum garanti, avec de la marge jusqu'à sa limite.
+
+### 🎛️ Changer la configuration à chaud
+
+Le seuil `threshold_malin` vient d'un ConfigMap **monté en fichier**. Je l'ai passé de 0,5 à 0,05 :
+
+- le fichier a changé dans les pods **en un peu plus d'une minute**, sans en recréer aucun ;
+- l'exemple bénin (probabilité malin de 8,54 %) a basculé de **BÉNIN** à **MALIN**.
+
+<p align="center"><img src="docs/seuil-a-chaud.png" alt="Seuil à chaud" width="80%"></p>
+
+`LOG_LEVEL`, lui, est une **variable d'environnement** : il n'a changé qu'après un `kubectl rollout restart`. Une variable est lue une seule fois, au démarrage du processus.
+
+> Côté médical, un seuil bas réduit les faux négatifs (un cancer raté), au prix de nombreux faux positifs (des examens en trop). Le bon seuil se choisit avec les médecins, pas dans un YAML.
+
+### 📈 Autoscaling
+
+```powershell
+kubectl autoscale deployment bc-api --cpu-percent=50 --min=2 --max=6
+```
+
+Sous la charge de deux générateurs `busybox`, qui appellent `/api/info` en boucle :
+
+| Moment | CPU moyen | Pods |
+|---|---|---|
+| au repos | 3 % | 3 |
+| 1ʳᵉ charge | 64 % | 3 → **4** |
+| 2ᵉ charge | 196 % | 4 → **6** (le maximum) |
+
+<p align="center"><img src="docs/hpa-montee.png" alt="HPA" width="80%"></p>
+
+Le pourcentage se calcule par rapport à la *request* CPU : sans `resources`, pas d'autoscaling.
+
+### 🔄 Mise à jour v2, puis retour arrière
+
+Le Job `bc-train-v2` entraîne des RandomForest (`ALGO=forest`) dans `models/v2/`. La v2 est déployée avec `12-api-v2.yaml` (`bc-api:2.0`, `MODEL_VERSION=v2`) :
+
+```yaml
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1          # un pod v2 en plus avant d'en retirer un v1
+    maxUnavailable: 0    # jamais moins de pods prêts que demandé
+revisionHistoryLimit: 5
+```
+
+Les pods sont remplacés un par un, et la boucle de surveillance n'a affiché aucune erreur. Puis la comparaison :
+
+| Tâche | Métrique | v1 (linear) | v2 (forest) |
 |---|---|---|---|
-| Classification | StandardScaler + LogisticRegression | Accuracy | **0,9825** |
-| | | F1 | **0,9861** |
-| Régression | StandardScaler + Ridge | R² | **0,9952** |
-| | | MAE | **15,37** |
+| Classification | Accuracy | **0,9825** | 0,9561 |
+| | F1 | **0,9861** | 0,9655 |
+| Régression | R² | 0,9952 | **0,9981** |
+| | MAE | 15,37 | **7,69** |
 
-> **À retenir** : un R² de 0,995 paraît presque trop beau. Il ne l'est pas : `mean area` se calcule pratiquement à partir de `mean radius` et de `mean perimeter`, qui font partie des entrées. La régression est facile par construction ; l'intérêt du TP est ailleurs.
+La v2 est meilleure en régression, mais **moins bonne en classification** : 5 erreurs sur 114 tumeurs de test, contre 2 en v1. Pour un outil d'aide au diagnostic, c'est rédhibitoire. Retour arrière :
+
+```powershell
+kubectl rollout undo deployment/bc-api
+```
+
+<p align="center"><img src="docs/rollback.png" alt="Rollback" width="80%"></p>
+
+Le rollback ne crée pas de nouveau ReplicaSet : il **réutilise** celui de la v1, qui reprend ses pods. Celui de la v2 reste vide mais conservé, prêt à resservir. `MODEL_VERSION` est écrit dans le template du Deployment, et non dans le ConfigMap : l'image et les modèles reviennent en arrière **ensemble**. Dans le ConfigMap, le rollback aurait donné un mélange incohérent, l'image 1.0 avec les modèles v2.
+
+| # | Nouveau fichier | Rôle |
+|---|---|---|
+| 09 | `09-hpa.yaml` | Autoscaler de 2 à 6 pods, cible 50 % de CPU |
+| 11 | `11-train-job-v2.yaml` | Entraînement des RandomForest |
+| 12 | `12-api-v2.yaml` | Le Deployment de l'API en v2 |
+
+Les fichiers `02`, `03`, `05`, `06` et `07` ont aussi été enrichis : sondes, ressources, stratégie de mise à jour et `change-cause`.
+
+---
 
 ## Ce qu'on a appris en chemin
 
 | 🧩 Problème rencontré | 🔧 Ce qu'on a fait |
 |---|---|
-| `docker build` échouait : `path "app/trainer" not found` | L'archive s'était extraite dans un sous-dossier du même nom. On travaille depuis le dossier qui contient `app/` |
-| `pip install` coupé en plein build (`Read timed out`, 49 kB/s) | Changement de réseau. Docker garde les couches déjà construites, et `bc-api:2.0` s'est construite en 2 s grâce au cache de la 1.0 |
-| Pods en `ImagePullBackOff` alors que les images existaient | Minikube a son propre stockage d'images. `minikube image load` pour chacune, et `imagePullPolicy: IfNotPresent` |
-| L'API répondait `NoSuchBucket` | Le Job n'avait jamais été appliqué : aucun modèle dans MinIO. Une fois le Job lancé, l'API a chargé les modèles toute seule |
-| `Connection refused` sur `base:6379`, alors que Redis tournait | `kubectl create service` avait mis `selector: app: base`. `kubectl get endpoints base` affichait `<none>`. Corrigé en `app: redis` |
-| Un deuxième `kubectl apply` du Job ne relançait rien | Réponse `unchanged` : un Job terminé ne repart pas. Pour réentraîner, on le supprime puis on le recrée |
-| `served_by` affichait toujours le même pod | `port-forward` se branche sur un seul pod. Depuis un pod `curl` dans le cluster, les 3 pods alternent bien |
-| `ERR_NAME_NOT_RESOLVED` sur `bc.local` | La ligne avait été écrite dans un onglet du Bloc-notes, pas dans le vrai fichier hosts. Corrigé depuis un PowerShell administrateur, vérifié avec `ping bc.local` |
+| `docker build` : `path "app/trainer" not found` | L'archive s'était extraite dans un sous-dossier du même nom. On travaille depuis le dossier qui contient `app/` |
+| `pip install` coupé en plein build (`Read timed out`) | Changement de réseau. Docker garde les couches déjà construites : `bc-api:2.0` s'est construite en 2 s grâce au cache |
+| Pods en `ImagePullBackOff` | Minikube a son propre stockage d'images : `minikube image load`, et `imagePullPolicy: IfNotPresent` |
+| L'API répondait `NoSuchBucket` | Le Job n'avait jamais été appliqué. Une fois lancé, l'API a chargé les modèles toute seule |
+| `Connection refused` sur `base:6379` | `selector: app: base` généré par kubectl. `kubectl get endpoints base` affichait `<none>`. Corrigé en `app: redis` |
+| `ERR_NAME_NOT_RESOLVED` sur `bc.local` | Fichier hosts pas réellement modifié. Corrigé depuis un PowerShell administrateur |
+| Modifier MinIO effaçait les modèles | `emptyDir` vidé à chaque recréation du pod. MinIO appliqué en premier, puis Job v1 relancé avant le reste |
+| Ligne illisible dans `02-configmaps.yaml` (`\uFEFF\x74…`) | PowerShell avait ajouté un BOM et des fins de ligne Windows. Fichier réécrit en YAML propre (`model-config.yaml: \|`) |
+| `curl` : `Could not connect to server` | `minikube tunnel` arrêté. Relancé dans un PowerShell administrateur |
+| `CHANGE-CAUSE` resté à `<none>` | L'annotation n'était pas encore recopiée sur la révision. Un second `apply` a suffi |
+| La mise à jour v2 ne démarrait pas | Le terminal était dans le dossier parent. Avec `kubectl get rs`, on voit tout de suite s'il y a un nouveau ReplicaSet |
 
 ## Démarrage rapide
 
 **Prérequis** : Docker Desktop, Minikube et kubectl. Testé sous Windows 11, Minikube v1.39, driver docker.
 
-**1. Le cluster**
-
 ```powershell
+# 1. Cluster
 minikube start
 minikube addons enable ingress
 minikube addons enable metrics-server
-```
 
-**2. Les images**, construites en local puis chargées dans Minikube :
-
-```powershell
+# 2. Images
 .\scripts\build-images.ps1
-minikube image ls | findstr bc-
-```
 
-**3. Les Secrets**, recréés à la main parce qu'ils ne sont pas dans le dépôt :
-
-```powershell
+# 3. Secrets (non versionnés)
 kubectl create secret generic minio-secret `
   --from-literal=MINIO_ACCESS_KEY=<utilisateur> `
   --from-literal=MINIO_SECRET_KEY=<mot-de-passe>
 kubectl create secret generic api-secret --from-literal=API_KEY=<cle-api>
-```
 
-**4. La stack**
-
-```powershell
+# 4. Stack (partie A + sondes de la partie B)
 kubectl apply -f k8s\02-configmaps.yaml
 kubectl apply -f k8s\03-minio.yaml
 kubectl apply -f k8s\04-train-job-v1.yaml
@@ -195,21 +279,18 @@ kubectl apply -f k8s\05-redis.yaml
 kubectl apply -f k8s\06-api.yaml
 kubectl apply -f k8s\07-front.yaml
 kubectl apply -f k8s\08-ingress.yaml
+kubectl apply -f k8s\09-hpa.yaml
 ```
 
-**5. L'accès.** Dans un PowerShell **administrateur**, à laisser ouvert :
+Ensuite, dans un PowerShell **administrateur** à laisser ouvert : `minikube tunnel`. Ajoute `127.0.0.1 bc.local` au fichier `C:\Windows\System32\drivers\etc\hosts`, puis ouvre 👉 **http://bc.local**.
+
+Pour la v2 :
 
 ```powershell
-minikube tunnel
+kubectl apply -f k8s\11-train-job-v2.yaml      # modèles v2 dans MinIO
+kubectl apply -f k8s\12-api-v2.yaml            # mise à jour progressive
+kubectl rollout undo deployment/bc-api         # retour en v1
 ```
-
-Puis, toujours en administrateur, déclarer le nom `bc.local` :
-
-```powershell
-Add-Content C:\Windows\System32\drivers\etc\hosts "`n127.0.0.1 bc.local"
-```
-
-Ensuite, ouvrir 👉 **http://bc.local**.
 
 <details>
 <summary>⚙️ Configuration</summary>
@@ -222,16 +303,14 @@ Ensuite, ouvrir 👉 **http://bc.local**.
 | `MINIO_BUCKET` | ml-config | `models` | trainer, api |
 | `REDIS_HOST` / `REDIS_PORT` | ml-config | `base` / `"6379"` | api |
 | `CACHE_TTL` | ml-config | `"60"` | api |
-| `LOG_LEVEL` | ml-config | `INFO` | api |
+| `LOG_LEVEL` | ml-config | `INFO` | api (lue au démarrage seulement) |
 | `APP_TITLE` | ml-config | titre de la page | front |
-| `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | minio-secret | — | trainer, api (MinIO les lit sous `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD`) |
+| `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | minio-secret | — | trainer, api ; MinIO les lit sous `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` |
 | `API_KEY` | api-secret | — | api, front |
-| `MODEL_VERSION` | manifeste | `v1` | trainer, api |
-| `ALGO` | manifeste du Job | `linear` | trainer |
+| `MODEL_VERSION` | template du Deployment | `v1` / `v2` | trainer, api |
+| `ALGO` | Job | `linear` / `forest` | trainer |
 | `APP_VERSION` | gravée dans l'image | `1.0` / `2.0` | api |
-| `threshold_malin` | model-config, fichier monté | `0.5` | api |
-
-`model-config` est monté comme un dossier, sans `subPath`. Une modification du ConfigMap arrive donc dans le pod sans redémarrage, et l'API relit le fichier dès qu'il change.
+| `threshold_malin` | model-config, fichier monté | `0.5` | api (relu à chaud) |
 
 </details>
 
@@ -242,51 +321,29 @@ Ensuite, ouvrir 👉 **http://bc.local**.
 
 | Méthode | Route | Clé | Rôle |
 |---|---|---|---|
-| GET | `/health` | — | Le processus répond |
-| GET | `/ready` | — | Modèles chargés **et** Redis joignable |
+| GET | `/health` | — | Le processus répond (liveness) |
+| GET | `/ready` | — | Modèles chargés **et** Redis joignable (readiness) |
 | GET | `/api/info` | — | Versions, métriques, exemples |
 | GET | `/api/stats` | — | Compteurs et pod qui a répondu |
 | POST | `/api/predict/classification` | ✔ | Malin ou bénin |
 | POST | `/api/predict/regression` | ✔ | `mean area` |
-| POST | `/api/admin/break-health` | ✔ | Simule une panne (partie B) |
-
-Les mesures absentes de la requête sont remplacées par la moyenne du jeu d'entraînement, et listées dans `filled_with_mean`.
+| POST | `/api/admin/break-health` | ✔ | Simule une panne de `/health` |
 
 </details>
 
 <details>
-<summary>🩺 Vérifier que tout tourne</summary>
+<summary>🩺 Commandes de diagnostic utiles</summary>
 
 <br>
 
 ```powershell
-kubectl get deploy,svc,ingress,jobs,cm,secret
-kubectl logs job/bc-train-v1              # métriques + "entraînement terminé avec succès"
-kubectl logs deploy/bc-api --tail=3       # "modèles v1 chargés depuis s3://models/v1/"
-kubectl get endpoints base                # une IP, pas <none>
-.\scripts\test-api.ps1                    # info, classification, régression, stats
+kubectl get deploy,svc,ingress,jobs,cm,secret,hpa
+kubectl get endpoints bc-api              # quels pods reçoivent du trafic
+kubectl describe pod <pod>                # section Events : sondes, redémarrages
+kubectl top pods                          # consommation réelle
+kubectl get rs -l app=bc-api              # un ReplicaSet par version
+kubectl rollout history deployment/bc-api
 ```
-
-Pour voir la répartition entre les 3 pods :
-
-```sh
-kubectl run curl --rm -it --image=curlimages/curl --restart=Never -- sh
-for i in 1 2 3 4 5 6; do curl -s bc-api:8000/api/stats; echo; done
-```
-
-</details>
-
-<details>
-<summary>🛠️ Choix techniques</summary>
-
-<br>
-
-- **Le Job plutôt qu'un Deployment pour entraîner.** Un Deployment verrait la fin du script comme une panne, et réentraînerait en boucle.
-- **`strategy: Recreate` pour MinIO.** Pendant une mise à jour, jamais deux MinIO en même temps sur le même stockage.
-- **Le front appelle `http://bc-api:8000`, pas `http://bc.local/api`.** `bc.local` n'existe que dans le fichier hosts de la machine, et un pod ne sait pas le résoudre. Le trafic interne reste dans le cluster.
-- **Routage de l'Ingress.** Deux règles en `Prefix` sur `/` et `/api`. Pour `/api/info`, nginx retient le préfixe le plus long.
-- **Timeouts à 3600 s sur l'Ingress.** Streamlit garde un websocket ouvert, que nginx couperait sinon au bout de 60 s.
-- **`envFrom` d'un côté, `secretKeyRef` de l'autre.** On prend un Secret entier quand les noms conviennent, une clé précise quand il faut la renommer ou n'en donner qu'une.
 
 </details>
 
@@ -298,38 +355,30 @@ for i in 1 2 3 4 5 6; do curl -s bc-api:8000/api/stats; echo; done
 ```
 .
 ├── app/
-│   ├── api/          FastAPI : chargement des modèles, prédictions, cache Redis
-│   ├── front/        Streamlit : formulaire, résultats, statistiques
+│   ├── api/          FastAPI : modèles, prédictions, cache Redis, /health et /ready
+│   ├── front/        Streamlit
 │   └── trainer/      scikit-learn : entraînement et dépôt dans MinIO
-├── k8s/              les 9 manifestes (01-secrets.yaml exclu du dépôt)
+├── k8s/              00 à 08 (partie A), 09, 11, 12 (partie B) ; 01-secrets.yaml exclu
 ├── scripts/
 │   ├── build-images.ps1
 │   └── test-api.ps1
 ├── docs/             bannière et captures
-└── model-config.yaml seuil de décision du classifieur
+└── model-config.yaml
 ```
 
 </details>
 
 ## Limites et pistes
 
-- 💾 **MinIO stocke sur un `emptyDir`.** Si le pod est supprimé, les modèles partent avec lui. Un PersistentVolumeClaim réglerait ça.
-- 🔐 **Un Secret n'est que du base64.** Il est exclu de Git, mais il reste lisible par quiconque a accès au cluster. En production, on passerait par le chiffrement d'etcd ou un outil comme Sealed Secrets.
-- 🩹 **Pas encore de sondes ni de limites sur l'API.** Kubernetes ne sait pas qu'un pod `Running` attend encore ses modèles. C'est l'objet de la partie B.
-- 🏷️ **MinIO en `:latest`.** Pratique pour un TP, mais deux déploiements peuvent tirer deux versions différentes. Il faudrait fixer un tag.
-- 🖥️ **Un seul nœud.** Minikube suffit pour apprendre, mais les 3 réplicas tournent sur la même machine.
-
-## Suite : partie B
-
-- [ ] sondes `startup`, `liveness` (`/health`) et `readiness` (`/ready`)
-- [ ] `requests` / `limits` et autoscaling (HPA de 2 à 6 réplicas)
-- [ ] Job `bc-train-v2` avec `ALGO=forest`
-- [ ] rolling update `bc-api:1.0` → `2.0`, puis rollback
-- [ ] diagnostic d'une panne simulée avec `/api/admin/break-health`
+- 💾 **MinIO stocke toujours sur un `emptyDir`.** Chaque modification de son Deployment efface les modèles, et oblige à relancer les Jobs. Un PersistentVolumeClaim est la prochaine chose à ajouter.
+- 🔀 **v1 ou v2, mais pas les deux.** La meilleure combinaison serait la classification v1 avec la régression v2. Il faudrait une version par modèle (`CLASSIFIER_VERSION`, `REGRESSOR_VERSION`) ou une v3 combinée.
+- 🔐 **Un Secret n'est que du base64.** Il est exclu de Git, mais reste lisible par quiconque a accès au cluster. En production : chiffrement d'etcd, ou Sealed Secrets.
+- ⚖️ **`replicas: 3` dans le fichier, et un HPA à côté.** Chaque `apply` remet 3 pods, avant que le HPA ne corrige. Avec un HPA, on retirerait `replicas` du Deployment.
+- 🏷️ **MinIO en `:latest`**, et un seul nœud : suffisant pour apprendre, pas pour la production.
 
 ## Utilisation de l'IA générative
 
-Un assistant IA a servi d'appui pour comprendre les étapes, diagnostiquer les erreurs rencontrées et mettre en forme ce README. Les manifestes ont été écrits, appliqués et testés sur Minikube par l'auteur ; les captures et les mesures viennent de ces exécutions.
+Un assistant IA a servi d'appui pour comprendre les étapes, diagnostiquer les erreurs rencontrées et mettre en forme ce README. Les manifestes ont été écrits, appliqués et testés sur Minikube par l'auteur. Les captures et les mesures viennent de ces exécutions.
 
 ---
 
