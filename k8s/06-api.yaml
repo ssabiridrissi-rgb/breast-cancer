@@ -1,0 +1,64 @@
+﻿apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: bc-api
+  name: bc-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: bc-api
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: bc-api
+    spec:
+      containers:
+      - image: bc-api:1.0
+        name: api                          # ← renommé (kubectl avait mis bc-api)
+        imagePullPolicy: IfNotPresent      # ← image locale
+        ports:
+        - containerPort: 8000
+        envFrom:                           # ← toutes les clés d'un coup
+        - configMapRef:
+            name: ml-config                #    MINIO_ENDPOINT, REDIS_HOST, CACHE_TTL...
+        - secretRef:
+            name: minio-secret             #    MINIO_ACCESS_KEY, MINIO_SECRET_KEY
+        env:
+        - name: MODEL_VERSION              # ← quels modèles charger (dossier v1/)
+          value: "v1"
+        - name: API_KEY                    # ← UNE seule clé lue dans api-secret
+          valueFrom:
+            secretKeyRef:
+              name: api-secret
+              key: API_KEY
+        volumeMounts:                      # ← le fichier de config monté
+        - name: model-config
+          mountPath: /etc/model-config
+          readOnly: true
+        resources: {}
+      volumes:                             # ← au même niveau que containers
+      - name: model-config
+        configMap:
+          name: model-config
+status: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: bc-api
+  name: bc-api
+spec:
+  ports:
+  - name: 8000-8000
+    port: 8000
+    protocol: TCP
+    targetPort: 8000
+  selector:
+    app: bc-api
+  type: ClusterIP
+status:
+  loadBalancer: {}

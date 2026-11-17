@@ -1,0 +1,42 @@
+﻿apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: redis
+  name: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: redis              # ← étiquette des Pods Redis
+    spec:
+      containers:
+      - image: redis:7-alpine
+        name: redis
+        ports:
+        - containerPort: 6379
+        resources: {}
+status: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: base
+  name: base                    # ← le nom DNS utilisé par l'API (REDIS_HOST=base)
+spec:
+  ports:
+  - name: 6379-6379
+    port: 6379
+    protocol: TCP
+    targetPort: 6379
+  selector:
+    app: redis                  # ← CORRIGÉ : doit correspondre à l'étiquette des Pods Redis
+  type: ClusterIP
+status:
+  loadBalancer: {}

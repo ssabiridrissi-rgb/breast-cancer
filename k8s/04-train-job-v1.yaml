@@ -1,0 +1,32 @@
+﻿apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bc-train-v1
+spec:
+  backoffLimit: 4
+  template:
+    metadata: {}
+    spec:
+      restartPolicy: Never
+      containers:
+      - image: bc-trainer:1.0
+        name: bc-train-v1
+        imagePullPolicy: IfNotPresent
+        envFrom:
+        - configMapRef:
+            name: ml-config
+        - secretRef:
+            name: minio-secret
+        env:
+        - name: MODEL_VERSION
+          value: "v1"
+        - name: ALGO
+          value: "linear"
+        resources:
+          requests:
+            cpu: 250m
+            memory: 256Mi
+          limits:
+            cpu: "1"
+            memory: 1Gi
+status: {}

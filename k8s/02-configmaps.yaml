@@ -1,0 +1,19 @@
+﻿apiVersion: v1
+data:
+  APP_TITLE: Aide au diagnostic - Breast Cancer
+  CACHE_TTL: "60"
+  LOG_LEVEL: INFO
+  MINIO_BUCKET: models
+  MINIO_ENDPOINT: minio:9000
+  REDIS_HOST: base
+  REDIS_PORT: "6379"
+kind: ConfigMap
+metadata:
+  name: ml-config
+---
+apiVersion: v1
+data:
+  model-config.yaml: "\uFEFF\x74\x68\x72\x65\x73\x68\x6F\x6C\x64\x5F\x6D\x61\x6C\x69\x6E\x3A\x20\x30\x2E\x35\r\n"
+kind: ConfigMap
+metadata:
+  name: model-config

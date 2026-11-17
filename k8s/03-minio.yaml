@@ -1,0 +1,66 @@
+﻿apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: minio
+  name: minio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  strategy:
+    type: Recreate                                   # ← 5. remplace "strategy: {}"
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      containers:
+      - image: cgr.dev/chainguard/minio:latest
+        name: minio
+        args: ["server", "/data", "--console-address", ":9001"]   # ← 1. arguments
+        env:                                         # ← 2. identifiants depuis le Secret
+        - name: MINIO_ROOT_USER
+          valueFrom:
+            secretKeyRef:
+              name: minio-secret
+              key: MINIO_ACCESS_KEY
+        - name: MINIO_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: minio-secret
+              key: MINIO_SECRET_KEY
+        ports:
+        - containerPort: 9000                        # ← 3. API S3 (déjà là)
+        - containerPort: 9001                        # ← 3. console web (à ajouter)
+        resources: {}
+        volumeMounts:                                # ← 4. on monte le volume sur /data
+        - name: data
+          mountPath: /data
+      volumes:                                       # ← 4. le volume lui-même (même niveau que containers)
+      - name: data
+        emptyDir: {}
+status: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: minio
+  name: minio
+spec:
+  ports:
+  - name: 9000-9000
+    port: 9000
+    protocol: TCP
+    targetPort: 9000
+  - name: 9001-9001
+    port: 9001
+    protocol: TCP
+    targetPort: 9001
+  selector:
+    app: redis
+  type: ClusterIP
+status:
+  loadBalancer: {}
