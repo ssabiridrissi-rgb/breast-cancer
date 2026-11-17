@@ -376,10 +376,6 @@ kubectl rollout history deployment/bc-api
 - ⚖️ **`replicas: 3` dans le fichier, et un HPA à côté.** Chaque `apply` remet 3 pods, avant que le HPA ne corrige. Avec un HPA, on retirerait `replicas` du Deployment.
 - 🏷️ **MinIO en `:latest`**, et un seul nœud : suffisant pour apprendre, pas pour la production.
 
-## Utilisation de l'IA générative
 
-Un assistant IA a servi d'appui pour comprendre les étapes, diagnostiquer les erreurs rencontrées et mettre en forme ce README. Les manifestes ont été écrits, appliqués et testés sur Minikube par l'auteur. Les captures et les mesures viennent de ces exécutions.
-
----
 
 <p align="center"><sub>Projet pédagogique, pas un outil médical. · <a href="https://github.com/ssabiridrissi-rgb">ssabiridrissi-rgb</a></sub></p>
