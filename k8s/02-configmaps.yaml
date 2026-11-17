@@ -13,7 +13,8 @@ metadata:
 ---
 apiVersion: v1
 data:
-  model-config.yaml: "\uFEFF\x74\x68\x72\x65\x73\x68\x6F\x6C\x64\x5F\x6D\x61\x6C\x69\x6E\x3A\x20\x30\x2E\x35\r\n"
+  model-config.yaml: |
+    threshold_malin: 0.5
 kind: ConfigMap
 metadata:
   name: model-config

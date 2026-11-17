@@ -10,7 +10,7 @@ spec:
     matchLabels:
       app: minio
   strategy:
-    type: Recreate                                   # ← 5. remplace "strategy: {}"
+    type: Recreate
   template:
     metadata:
       labels:
@@ -19,8 +19,8 @@ spec:
       containers:
       - image: cgr.dev/chainguard/minio:latest
         name: minio
-        args: ["server", "/data", "--console-address", ":9001"]   # ← 1. arguments
-        env:                                         # ← 2. identifiants depuis le Secret
+        args: ["server", "/data", "--console-address", ":9001"]
+        env:
         - name: MINIO_ROOT_USER
           valueFrom:
             secretKeyRef:
@@ -32,16 +32,33 @@ spec:
               name: minio-secret
               key: MINIO_SECRET_KEY
         ports:
-        - containerPort: 9000                        # ← 3. API S3 (déjà là)
-        - containerPort: 9001                        # ← 3. console web (à ajouter)
-        resources: {}
-        volumeMounts:                                # ← 4. on monte le volume sur /data
+        - containerPort: 9000
+        - containerPort: 9001
+        readinessProbe:              # ← B1 : MinIO est-il prêt à servir des fichiers ?
+          httpGet:
+            path: /minio/health/ready
+            port: 9000
+          periodSeconds: 5
+          failureThreshold: 2
+        livenessProbe:               # ← B1 : MinIO est-il toujours vivant ?
+          httpGet:
+            path: /minio/health/live
+            port: 9000
+          periodSeconds: 10
+          failureThreshold: 3
+        resources:                   # ← B1
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        volumeMounts:
         - name: data
           mountPath: /data
-      volumes:                                       # ← 4. le volume lui-même (même niveau que containers)
+      volumes:
       - name: data
         emptyDir: {}
-status: {}
 ---
 apiVersion: v1
 kind: Service
@@ -51,16 +68,12 @@ metadata:
   name: minio
 spec:
   ports:
-  - name: 9000-9000
+  - name: "9000"
     port: 9000
-    protocol: TCP
     targetPort: 9000
-  - name: 9001-9001
+  - name: "9001"
     port: 9001
-    protocol: TCP
     targetPort: 9001
   selector:
-    app: redis
+    app: minio
   type: ClusterIP
-status:
-  loadBalancer: {}

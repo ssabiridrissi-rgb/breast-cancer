@@ -9,26 +9,40 @@ spec:
   selector:
     matchLabels:
       app: redis
-  strategy: {}
   template:
     metadata:
       labels:
-        app: redis              # ← étiquette des Pods Redis
+        app: redis
     spec:
       containers:
       - image: redis:7-alpine
         name: redis
         ports:
         - containerPort: 6379
-        resources: {}
-status: {}
+        readinessProbe:              # ← B1 : on lance "redis-cli ping" dans le conteneur
+          exec:
+            command: ["redis-cli", "ping"]
+          periodSeconds: 5
+          failureThreshold: 2
+        livenessProbe:               # ← B1 : le port 6379 accepte-t-il une connexion ?
+          tcpSocket:
+            port: 6379
+          periodSeconds: 10
+          failureThreshold: 3
+        resources:                   # ← B1
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 128Mi
 ---
 apiVersion: v1
 kind: Service
 metadata:
   labels:
     app: base
-  name: base                    # ← le nom DNS utilisé par l'API (REDIS_HOST=base)
+  name: base
 spec:
   ports:
   - name: 6379-6379
@@ -36,7 +50,5 @@ spec:
     protocol: TCP
     targetPort: 6379
   selector:
-    app: redis                  # ← CORRIGÉ : doit correspondre à l'étiquette des Pods Redis
+    app: redis
   type: ClusterIP
-status:
-  loadBalancer: {}

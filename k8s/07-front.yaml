@@ -9,7 +9,6 @@ spec:
   selector:
     matchLabels:
       app: bc-front
-  strategy: {}
   template:
     metadata:
       labels:
@@ -18,24 +17,47 @@ spec:
       containers:
       - image: bc-front:1.0
         name: bc-front
-        imagePullPolicy: IfNotPresent        # ← image locale
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8501
         env:
-        - name: API_URL                      # ← le front appelle l'API en INTERNE
+        - name: API_URL
           value: "http://bc-api:8000"
-        - name: APP_TITLE                    # ← UNE clé lue dans le ConfigMap
+        - name: APP_TITLE
           valueFrom:
             configMapKeyRef:
               name: ml-config
               key: APP_TITLE
-        - name: API_KEY                      # ← le « badge » pour l'API
+        - name: API_KEY
           valueFrom:
             secretKeyRef:
               name: api-secret
               key: API_KEY
-        resources: {}
-status: {}
+        startupProbe:                # ← B1 : Streamlit est lent, jusqu'à 24 × 5 s = 120 s
+          httpGet:
+            path: /_stcore/health
+            port: 8501
+          periodSeconds: 5
+          failureThreshold: 24
+        livenessProbe:               # ← B1
+          httpGet:
+            path: /_stcore/health
+            port: 8501
+          periodSeconds: 10
+          failureThreshold: 3
+        readinessProbe:              # ← B1
+          httpGet:
+            path: /_stcore/health
+            port: 8501
+          periodSeconds: 5
+          failureThreshold: 2
+        resources:                   # ← B1
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: "1"
+            memory: 768Mi
 ---
 apiVersion: v1
 kind: Service
@@ -46,11 +68,9 @@ metadata:
 spec:
   ports:
   - name: 80-8501
-    port: 80                # ← port du Service (celui que l'Ingress appelle)
+    port: 80
     protocol: TCP
-    targetPort: 8501        # ← port du conteneur Streamlit
+    targetPort: 8501
   selector:
     app: bc-front
   type: ClusterIP
-status:
-  loadBalancer: {}
